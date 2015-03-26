@@ -1,20 +1,25 @@
 // SOCKS Protocol Version 5
 // http://tools.ietf.org/html/rfc1928
+// http://tools.ietf.org/html/rfc1929
 package gosocks5
 
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
+	"errors"
+	//"fmt"
+	"io"
+	//"log"
 	"net"
+	"strconv"
 )
 
-const Version5 uint8 = 5
-
-type MethodType uint8
+const (
+	Ver5 = 5
+)
 
 const (
-	MethodNoAuth MethodType = iota
+	MethodNoAuth uint8 = iota
 	MethodGSSAPI
 	MethodUserPass
 	// X'03' to X'7F' IANA ASSIGNED
@@ -22,26 +27,20 @@ const (
 	MethodNoAcceptable = 0xFF
 )
 
-type CmdType uint8
-
 const (
-	CmdConnect CmdType = 1
-	CmdBind            = 2
-	CmdUdp             = 3
+	CmdConnect uint8 = 1
+	CmdBind          = 2
+	CmdUdp           = 3
 )
 
-type AddrType uint8
-
 const (
-	AddrIPv4       AddrType = 1
-	AddrDomainName          = 3
-	AddrIPv6                = 4
+	AddrIPv4   uint8 = 1
+	AddrDomain       = 3
+	AddrIPv6         = 4
 )
 
-type ReplyType uint8
-
 const (
-	Succeeded ReplyType = iota
+	Succeeded uint8 = iota
 	Failure
 	NotAllowed
 	NetUnreachable
@@ -52,129 +51,367 @@ const (
 	AddrUnsupported
 )
 
-type Socks5 struct {
-	conn    net.Conn
-	methods Methods
-}
-
-func NewSocks5(conn net.Conn, methods ...MethodType) *Socks5 {
-	s := &Socks5{
-		conn:    conn,
-		methods: Methods(methods),
-	}
-	if len(s.methods) == 0 {
-		s.methods = append(s.methods, MethodNoAuth)
-	}
-	return s
-}
-
-func (s *Socks5) Init() error {
-	b := make([]byte, 2)
-	if _, err := s.conn.Write(s.methods.Encode()); err != nil {
-		return err
-	}
-	if _, err := s.conn.Read(b); err != nil {
-		return err
-	}
-	return nil
-}
+var (
+	ErrBadVersion  = errors.New("Bad version")
+	ErrBadFormat   = errors.New("Bad format")
+	ErrBadAddrType = errors.New("Bad address type")
+	ErrShortBuffer = errors.New("Short buffer")
+	ErrBadMethod   = errors.New("Bad method")
+)
 
 /*
+Method selection
 +----+----------+----------+
 |VER | NMETHODS | METHODS  |
 +----+----------+----------+
 | 1  |    1     | 1 to 255 |
 +----+----------+----------+
 */
-type Methods []MethodType
-
-func (methods Methods) Encode() []byte {
+func ReadMethods(r io.Reader) ([]uint8, error) {
 	b := make([]byte, 257)
-	pos := 0
-	b[pos] = Version5
-	pos++
-	b[pos] = byte(len(methods))
-	pos++
-	for _, m := range methods {
-		b[pos] = byte(m)
-		pos++
+	n, err := io.ReadAtLeast(r, b, 2)
+	if err != nil {
+		return nil, err
 	}
 
-	return b[:pos]
+	if b[0] != Ver5 {
+		return nil, ErrBadVersion
+	}
+
+	if b[1] == 0 {
+		return nil, ErrBadMethod
+	}
+
+	length := 2 + int(b[1])
+	if n < length {
+		if _, err := io.ReadFull(r, b[n:length]); err != nil {
+			return nil, err
+		}
+	}
+
+	return b[2:length], nil
+}
+
+type Address struct {
+	Type uint8
+	Host string
+	Port uint16
+}
+
+func (addr *Address) Decode(b []byte) error {
+	addr.Type = b[0]
+	pos := 1
+	switch addr.Type {
+	case AddrIPv4:
+		addr.Host = net.IP(b[pos : pos+net.IPv4len]).String()
+		pos += net.IPv4len
+	case AddrIPv6:
+		addr.Host = net.IP(b[pos : pos+net.IPv6len]).String()
+		pos += net.IPv6len
+	case AddrDomain:
+		addrlen := int(b[pos])
+		pos++
+		addr.Host = string(b[pos : pos+addrlen])
+		pos += addrlen
+	default:
+		return ErrBadAddrType
+	}
+
+	addr.Port = binary.BigEndian.Uint16(b[pos:])
+
+	return nil
+}
+
+func (addr *Address) Encode(b []byte) (int, error) {
+	b[0] = addr.Type
+	pos := 1
+	switch addr.Type {
+	case AddrIPv4:
+		pos += copy(b[pos:], net.ParseIP(addr.Host).To4())
+	case AddrDomain:
+		b[pos] = byte(len(addr.Host))
+		pos++
+		pos += copy(b[pos:], []byte(addr.Host))
+	case AddrIPv6:
+		pos += copy(b[pos:], net.ParseIP(addr.Host).To16())
+	default:
+		b[0] = AddrIPv4
+		pos += 4
+	}
+	binary.BigEndian.PutUint16(b[pos:], addr.Port)
+	pos += 2
+
+	return pos, nil
+}
+
+func (addr *Address) String() string {
+	return net.JoinHostPort(addr.Host, strconv.Itoa(int(addr.Port)))
 }
 
 /*
+The SOCKSv5 request
 +----+-----+-------+------+----------+----------+
 |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
 +----+-----+-------+------+----------+----------+
 | 1  |  1  | X'00' |  1   | Variable |    2     |
 +----+-----+-------+------+----------+----------+
 */
-type CMD struct {
-	Cmd   CmdType
-	AType AddrType
-	Addr  string
-	Port  uint16
+type Request struct {
+	Cmd  uint8
+	Addr *Address
 }
 
-func NewCMD(cmdType CmdType, aType AddrType, addr string, port uint16) *CMD {
-	return &CMD{
-		Cmd:   cmdType,
-		AType: aType,
-		Addr:  addr,
-		Port:  port,
+func NewRequest(cmd uint8, addr *Address) *Request {
+	return &Request{
+		Cmd:  cmd,
+		Addr: addr,
 	}
 }
 
-func (cmd *CMD) Encode() []byte {
-	b := make([]byte, 128)
-	b[0] = Version5
-	b[1] = byte(cmd.Cmd)
-	b[3] = byte(cmd.AType)
-	pos := 4
+func ReadRequest(r io.Reader) (*Request, error) {
+	b := make([]byte, 262)
+	n, err := io.ReadAtLeast(r, b, 5)
+	if err != nil {
+		return nil, err
+	}
 
-	switch cmd.AType {
+	if b[0] != Ver5 {
+		return nil, ErrBadVersion
+	}
+
+	request := &Request{
+		Cmd: b[1],
+	}
+
+	atype := b[3]
+	length := 0
+	switch atype {
 	case AddrIPv4:
-		pos += copy(b[pos:], net.ParseIP(cmd.Addr).To4())
-	case AddrDomainName:
-		b[pos] = byte(len(cmd.Addr))
-		pos++
-		pos += copy(b[pos:], []byte(cmd.Addr))
+		length = 10
 	case AddrIPv6:
-		pos += copy(b[pos:], net.ParseIP(cmd.Addr).To16())
+		length = 22
+	case AddrDomain:
+		length = 7 + int(b[4])
+	default:
+		return nil, ErrBadAddrType
 	}
-	binary.BigEndian.PutUint16(b[pos:], cmd.Port)
 
-	return b[:pos+2]
+	if n < length {
+		if _, err := io.ReadFull(r, b[n:length]); err != nil {
+			return nil, err
+		}
+	}
+	addr := new(Address)
+	if err := addr.Decode(b[3:length]); err != nil {
+		return nil, err
+	}
+	request.Addr = addr
+
+	return request, nil
 }
 
-func (cmd *CMD) Decode(data []byte) {
-	cmd.Cmd = CmdType(data[1])
-	cmd.AType = AddrType(data[3])
+func (r *Request) Write(w io.Writer) (err error) {
+	b := make([]byte, 262)
 
-	pos := 4
-	switch cmd.AType {
+	b[0] = Ver5
+	b[1] = r.Cmd
+	// b[2] = 0 //rsv
+	b[3] = AddrIPv4 // default
+
+	length := 10
+	if r.Addr != nil {
+		n, _ := r.Addr.Encode(b[3:])
+		length = 3 + n
+	}
+	_, err = w.Write(b[:length])
+	return
+}
+
+/*
+The SOCKSv5 reply
++----+-----+-------+------+----------+----------+
+|VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
++----+-----+-------+------+----------+----------+
+| 1  |  1  | X'00' |  1   | Variable |    2     |
++----+-----+-------+------+----------+----------+
+*/
+type Reply struct {
+	Rep  uint8
+	Addr *Address
+}
+
+func NewReply(rep uint8, addr *Address) *Reply {
+	return &Reply{
+		Rep:  rep,
+		Addr: addr,
+	}
+}
+
+func ReadReply(r io.Reader) (*Reply, error) {
+	b := make([]byte, 262)
+	n, err := io.ReadAtLeast(r, b, 5)
+	if err != nil {
+		return nil, err
+	}
+
+	if b[0] != Ver5 {
+		return nil, ErrBadVersion
+	}
+
+	reply := &Reply{
+		Rep: b[1],
+	}
+
+	atype := b[3]
+	length := 0
+	switch atype {
 	case AddrIPv4:
-		cmd.Addr = net.IP(data[pos : pos+4]).String()
-		pos += 4
-	case AddrDomainName:
-		length := int(data[pos])
-		pos++
-		cmd.Addr = string(data[pos : pos+length])
-		pos += length
+		length = 10
 	case AddrIPv6:
-		cmd.Addr = net.IP(data[pos : pos+16]).String()
-		pos += 16
+		length = 22
+	case AddrDomain:
+		length = 7 + int(b[4])
+	default:
+		return nil, ErrBadAddrType
 	}
 
-	cmd.Port = binary.BigEndian.Uint16(data[pos:])
+	if n < length {
+		if _, err := io.ReadFull(r, b[n:length]); err != nil {
+			return nil, err
+		}
+	}
+
+	addr := new(Address)
+	if err := addr.Decode(b[3:length]); err != nil {
+		return nil, err
+	}
+	reply.Addr = addr
+
+	return reply, nil
 }
 
-func (cmd *CMD) String() string {
-	b := bytes.Buffer{}
-	b.WriteString("cmd:" + fmt.Sprintf("%x", cmd.Cmd))
-	b.WriteString("\natype:" + fmt.Sprintf("%x", cmd.AType))
-	b.WriteString("\naddr:" + cmd.Addr)
-	b.WriteString("\nport:" + fmt.Sprintf("%x", cmd.Port))
-	return b.String()
+func (r *Reply) Write(w io.Writer) (err error) {
+	b := make([]byte, 262)
+
+	b[0] = Ver5
+	b[1] = r.Rep
+	// b[2] = 0 //rsv
+	b[3] = AddrIPv4 // default
+
+	length := 10
+	if r.Addr != nil {
+		n, _ := r.Addr.Encode(b[3:])
+		length = 3 + n
+	}
+	_, err = w.Write(b[:length])
+
+	return
+}
+
+/*
+UDP request
++----+------+------+----------+----------+----------+
+|RSV | FRAG | ATYP | DST.ADDR | DST.PORT |   DATA   |
++----+------+------+----------+----------+----------+
+| 2  |  1   |  1   | Variable |    2     | Variable |
++----+------+------+----------+----------+----------+
+*/
+type UDPHeader struct {
+	Rsv  uint16
+	Frag uint8
+	Addr *Address
+}
+
+func NewUDPHeader(rsv uint16, frag uint8, addr *Address) *UDPHeader {
+	return &UDPHeader{
+		Rsv:  rsv,
+		Frag: frag,
+		Addr: addr,
+	}
+}
+
+type UDPDatagram struct {
+	Header *UDPHeader
+	Data   []byte
+}
+
+func NewUDPDatagram(header *UDPHeader, data []byte) *UDPDatagram {
+	return &UDPDatagram{
+		Header: header,
+		Data:   data,
+	}
+}
+
+func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
+	b := make([]byte, 65797)
+	n, err := io.ReadAtLeast(r, b, 5)
+	if err != nil {
+		return nil, err
+	}
+
+	header := &UDPHeader{
+		Rsv:  binary.BigEndian.Uint16(b[:2]),
+		Frag: b[2],
+	}
+
+	atype := b[3]
+	hlen := 0
+	switch atype {
+	case AddrIPv4:
+		hlen = 10
+	case AddrIPv6:
+		hlen = 22
+	case AddrDomain:
+		hlen = 7 + int(b[4])
+	default:
+		return nil, ErrBadAddrType
+	}
+
+	dlen := int(header.Rsv)
+	if n < hlen+dlen {
+		if _, err := io.ReadFull(r, b[n:hlen+dlen]); err != nil {
+			return nil, err
+		}
+		n = hlen + dlen
+	}
+
+	header.Addr = new(Address)
+	if err := header.Addr.Decode(b[3:hlen]); err != nil {
+		return nil, err
+	}
+
+	d := &UDPDatagram{
+		Header: header,
+		Data:   b[hlen:n],
+	}
+
+	return d, nil
+}
+
+func (d *UDPDatagram) Write(w io.Writer) error {
+	buffer := &bytes.Buffer{}
+
+	b := make([]byte, 259)
+	if d.Header != nil {
+		binary.BigEndian.PutUint16(b[:2], d.Header.Rsv)
+		buffer.Write(b[:2])
+		buffer.WriteByte(d.Header.Frag)
+
+		b[0] = AddrIPv4
+		b[1] = 0
+		length := 7
+
+		if d.Header.Addr != nil {
+			length, _ = d.Header.Addr.Encode(b)
+		}
+		buffer.Write(b[:length])
+	} else {
+		b[3] = AddrIPv4
+		buffer.Write(b[:10])
+	}
+
+	buffer.Write(d.Data)
+	_, err := w.Write(buffer.Bytes())
+
+	return err
 }
