@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	//"fmt"
+	"fmt"
 	"io"
 	//"log"
 	"net"
@@ -232,6 +232,11 @@ func (r *Request) Write(w io.Writer) (err error) {
 	return
 }
 
+func (r *Request) String() string {
+	return fmt.Sprintf("5 %d 0 %d %s",
+		r.Cmd, r.Addr.Type, r.Addr.String())
+}
+
 /*
 The SOCKSv5 reply
 +----+-----+-------+------+----------+----------+
@@ -313,6 +318,11 @@ func (r *Reply) Write(w io.Writer) (err error) {
 	return
 }
 
+func (r *Reply) String() string {
+	return fmt.Sprintf("5 %d 0 %d %s",
+		r.Rep, r.Addr.Type, r.Addr.String())
+}
+
 /*
 UDP request
 +----+------+------+----------+----------+----------+
@@ -333,6 +343,11 @@ func NewUDPHeader(rsv uint16, frag uint8, addr *Addr) *UDPHeader {
 		Frag: frag,
 		Addr: addr,
 	}
+}
+
+func (h *UDPHeader) String() string {
+	return fmt.Sprintf("%d %d %d %s",
+		h.Rsv, h.Frag, h.Addr.Type, h.Addr.String())
 }
 
 type UDPDatagram struct {
