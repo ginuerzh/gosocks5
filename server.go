@@ -9,10 +9,10 @@ type Server struct {
 	Addr string // TCP address to listen on
 
 	SelectMethod func(methods ...uint8) uint8
-	Handle       func(conn net.Conn, method uint8) error
+	Handle       func(conn net.Conn, method uint8)
 }
 
-func (s *Server) Serve() error {
+func (s *Server) ListenAndServe() error {
 	addr, err := net.ResolveTCPAddr("tcp", s.Addr)
 	if err != nil {
 		return err
@@ -30,7 +30,7 @@ func (s *Server) Serve() error {
 			log.Println("accept:", err)
 			continue
 		}
-		//log.Println("accept", conn.RemoteAddr().String())
+		//log.Println("accept", conn.RemoteAddr())
 		go s.handle(conn)
 	}
 }

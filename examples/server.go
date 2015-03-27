@@ -15,7 +15,7 @@ func main() {
 		Handle: handle,
 	}
 
-	server.Serve()
+	server.ListenAndServe()
 }
 
 func handle(conn net.Conn, method uint8) error {

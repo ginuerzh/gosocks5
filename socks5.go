@@ -92,13 +92,18 @@ func ReadMethods(r io.Reader) ([]uint8, error) {
 	return b[2:length], nil
 }
 
-type Address struct {
+func WriteMethod(method uint8, w io.Writer) error {
+	_, err := w.Write([]byte{Ver5, method})
+	return err
+}
+
+type Addr struct {
 	Type uint8
 	Host string
 	Port uint16
 }
 
-func (addr *Address) Decode(b []byte) error {
+func (addr *Addr) Decode(b []byte) error {
 	addr.Type = b[0]
 	pos := 1
 	switch addr.Type {
@@ -122,7 +127,7 @@ func (addr *Address) Decode(b []byte) error {
 	return nil
 }
 
-func (addr *Address) Encode(b []byte) (int, error) {
+func (addr *Addr) Encode(b []byte) (int, error) {
 	b[0] = addr.Type
 	pos := 1
 	switch addr.Type {
@@ -144,7 +149,7 @@ func (addr *Address) Encode(b []byte) (int, error) {
 	return pos, nil
 }
 
-func (addr *Address) String() string {
+func (addr *Addr) String() string {
 	return net.JoinHostPort(addr.Host, strconv.Itoa(int(addr.Port)))
 }
 
@@ -158,10 +163,10 @@ The SOCKSv5 request
 */
 type Request struct {
 	Cmd  uint8
-	Addr *Address
+	Addr *Addr
 }
 
-func NewRequest(cmd uint8, addr *Address) *Request {
+func NewRequest(cmd uint8, addr *Addr) *Request {
 	return &Request{
 		Cmd:  cmd,
 		Addr: addr,
@@ -201,7 +206,7 @@ func ReadRequest(r io.Reader) (*Request, error) {
 			return nil, err
 		}
 	}
-	addr := new(Address)
+	addr := new(Addr)
 	if err := addr.Decode(b[3:length]); err != nil {
 		return nil, err
 	}
@@ -237,10 +242,10 @@ The SOCKSv5 reply
 */
 type Reply struct {
 	Rep  uint8
-	Addr *Address
+	Addr *Addr
 }
 
-func NewReply(rep uint8, addr *Address) *Reply {
+func NewReply(rep uint8, addr *Addr) *Reply {
 	return &Reply{
 		Rep:  rep,
 		Addr: addr,
@@ -281,7 +286,7 @@ func ReadReply(r io.Reader) (*Reply, error) {
 		}
 	}
 
-	addr := new(Address)
+	addr := new(Addr)
 	if err := addr.Decode(b[3:length]); err != nil {
 		return nil, err
 	}
@@ -319,10 +324,10 @@ UDP request
 type UDPHeader struct {
 	Rsv  uint16
 	Frag uint8
-	Addr *Address
+	Addr *Addr
 }
 
-func NewUDPHeader(rsv uint16, frag uint8, addr *Address) *UDPHeader {
+func NewUDPHeader(rsv uint16, frag uint8, addr *Addr) *UDPHeader {
 	return &UDPHeader{
 		Rsv:  rsv,
 		Frag: frag,
@@ -375,7 +380,7 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 		n = hlen + dlen
 	}
 
-	header.Addr = new(Address)
+	header.Addr = new(Addr)
 	if err := header.Addr.Decode(b[3:hlen]); err != nil {
 		return nil, err
 	}
