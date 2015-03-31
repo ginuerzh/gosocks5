@@ -8,8 +8,9 @@ import (
 type Server struct {
 	Addr string // TCP address to listen on
 
-	SelectMethod func(methods ...uint8) uint8
-	Handle       func(conn net.Conn, method uint8)
+	SelectMethod   func(methods ...uint8) uint8
+	MethodSelected func(method uint8, conn net.Conn) (net.Conn, error)
+	Handle         func(conn net.Conn)
 }
 
 func (s *Server) ListenAndServe() error {
@@ -36,13 +37,15 @@ func (s *Server) ListenAndServe() error {
 }
 
 func (s *Server) handle(conn net.Conn) {
+	defer conn.Close()
+
 	methods, err := ReadMethods(conn)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	var method uint8
+	method := MethodNoAuth
 	if s.SelectMethod != nil {
 		method = s.SelectMethod(methods...)
 	}
@@ -52,9 +55,16 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 
+	if s.MethodSelected != nil {
+		c, err := s.MethodSelected(method, conn)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		conn = c
+	}
+
 	if s.Handle != nil {
-		s.Handle(conn, method)
-	} else {
-		conn.Close()
+		s.Handle(conn)
 	}
 }
