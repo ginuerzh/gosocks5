@@ -2,7 +2,7 @@ package gosocks5
 
 import (
 	"io"
-	"log"
+	//"log"
 	"net"
 	"sync"
 	"time"
@@ -98,7 +98,7 @@ func (conn *Conn) clientHandshake() error {
 		conn.c = c
 	}
 	conn.method = b[1]
-	log.Println("method:", conn.method)
+	//log.Println("method:", conn.method)
 	conn.handshaked = true
 	return nil
 }
@@ -130,7 +130,7 @@ func (conn *Conn) serverHandshake() error {
 		conn.c = c
 	}
 	conn.method = method
-	log.Println("method:", method)
+	//log.Println("method:", method)
 	conn.handshaked = true
 	return nil
 }
