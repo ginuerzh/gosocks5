@@ -355,8 +355,12 @@ func (r *Request) Write(w io.Writer) (err error) {
 }
 
 func (r *Request) String() string {
+	addr := r.Addr
+	if addr == nil {
+		addr = &Addr{}
+	}
 	return fmt.Sprintf("5 %d 0 %d %s",
-		r.Cmd, r.Addr.Type, r.Addr.String())
+		r.Cmd, addr.Type, addr.String())
 }
 
 /*
@@ -441,8 +445,12 @@ func (r *Reply) Write(w io.Writer) (err error) {
 }
 
 func (r *Reply) String() string {
+	addr := r.Addr
+	if addr == nil {
+		addr = &Addr{}
+	}
 	return fmt.Sprintf("5 %d 0 %d %s",
-		r.Rep, r.Addr.Type, r.Addr.String())
+		r.Rep, addr.Type, addr.String())
 }
 
 /*
@@ -508,7 +516,7 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 	default:
 		return nil, ErrBadAddrType
 	}
-
+	// extended feature, for udp over tcp
 	dlen := int(header.Rsv)
 	if n < hlen+dlen {
 		if _, err := io.ReadFull(r, b[n:hlen+dlen]); err != nil {
