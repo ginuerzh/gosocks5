@@ -311,12 +311,27 @@ func (addr *Addr) Encode(b []byte) (int, error) {
 		pos += copy(b[pos:], net.ParseIP(addr.Host).To16())
 	default:
 		b[0] = AddrIPv4
+		copy(b[pos:pos+4], net.IPv4zero.To4())
 		pos += 4
 	}
 	binary.BigEndian.PutUint16(b[pos:], addr.Port)
 	pos += 2
 
 	return pos, nil
+}
+
+func (addr *Addr) Length() (n int) {
+	switch addr.Type {
+	case AddrIPv4:
+		n = 10
+	case AddrIPv6:
+		n = 22
+	case AddrDomain:
+		n = 7 + len(addr.Host)
+	default:
+		n = 10
+	}
+	return
 }
 
 func (addr *Addr) String() string {
@@ -398,11 +413,13 @@ func (r *Request) Write(w io.Writer) (err error) {
 	b[2] = 0        //rsv
 	b[3] = AddrIPv4 // default
 
-	length := 10
-	if r.Addr != nil {
-		n, _ := r.Addr.Encode(b[3:])
-		length = 3 + n
+	addr := r.Addr
+	if addr == nil {
+		addr = &Addr{}
 	}
+	n, _ := addr.Encode(b[3:])
+	length := 3 + n
+
 	_, err = w.Write(b[:length])
 	return
 }
@@ -594,6 +611,7 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 	default:
 		return nil, ErrBadAddrType
 	}
+
 	// extended feature, for udp over tcp, using reserved field for data length
 	dlen := int(header.Rsv)
 	if n < hlen+dlen {
@@ -601,6 +619,9 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 			return nil, err
 		}
 		n = hlen + dlen
+	}
+	if dlen == 0 {
+		dlen = n - hlen
 	}
 
 	header.Addr = new(Addr)
