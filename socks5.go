@@ -233,7 +233,7 @@ func ReadUserPassResponse(r io.Reader) (*UserPassResponse, error) {
 	b := sPool.Get().([]byte)
 	defer sPool.Put(b)
 
-	if _, err := io.ReadFull(r, b); err != nil {
+	if _, err := io.ReadFull(r, b[:2]); err != nil {
 		return nil, err
 	}
 
