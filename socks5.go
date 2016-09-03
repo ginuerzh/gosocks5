@@ -302,13 +302,21 @@ func (addr *Addr) Encode(b []byte) (int, error) {
 	pos := 1
 	switch addr.Type {
 	case AddrIPv4:
-		pos += copy(b[pos:], net.ParseIP(addr.Host).To4())
+		ip4 := net.ParseIP(addr.Host).To4()
+		if ip4 == nil {
+			ip4 = net.IPv4zero.To4()
+		}
+		pos += copy(b[pos:], ip4)
 	case AddrDomain:
 		b[pos] = byte(len(addr.Host))
 		pos++
 		pos += copy(b[pos:], []byte(addr.Host))
 	case AddrIPv6:
-		pos += copy(b[pos:], net.ParseIP(addr.Host).To16())
+		ip16 := net.ParseIP(addr.Host).To16()
+		if ip16 == nil {
+			ip16 = net.IPv6zero.To16()
+		}
+		pos += copy(b[pos:], ip16)
 	default:
 		b[0] = AddrIPv4
 		copy(b[pos:pos+4], net.IPv4zero.To4())
