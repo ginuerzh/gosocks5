@@ -7,9 +7,21 @@ import (
 	"github.com/ginuerzh/gosocks5"
 )
 
+var (
+	// DefaultSelector is the default client selector.
+	DefaultSelector gosocks5.Selector = &clientSelector{}
+)
+
 type clientSelector struct {
 	methods []uint8
-	User    *url.Userinfo
+	user    *url.Userinfo
+}
+
+func NewClientSelector(user *url.Userinfo, methods ...uint8) gosocks5.Selector {
+	return &clientSelector{
+		methods: methods,
+		user:    user,
+	}
 }
 
 func (selector *clientSelector) Methods() []uint8 {
@@ -28,9 +40,9 @@ func (selector *clientSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 	switch method {
 	case gosocks5.MethodUserPass:
 		var username, password string
-		if selector.User != nil {
-			username = selector.User.Username()
-			password, _ = selector.User.Password()
+		if selector.user != nil {
+			username = selector.user.Username()
+			password, _ = selector.user.Password()
 		}
 
 		req := gosocks5.NewUserPassRequest(gosocks5.UserPassVer, username, password)

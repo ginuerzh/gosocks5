@@ -7,9 +7,22 @@ import (
 	"github.com/ginuerzh/gosocks5"
 )
 
+var (
+	// DefaultSelector is the default server selector.
+	// It only supports No-Auth Method.
+	DefaultSelector gosocks5.Selector = &serverSelector{}
+)
+
 type serverSelector struct {
 	methods []uint8
-	Users   []*url.Userinfo
+	users   []*url.Userinfo
+}
+
+func NewServerSelector(users []*url.Userinfo, methods ...uint8) gosocks5.Selector {
+	return &serverSelector{
+		methods: methods,
+		users:   users,
+	}
 }
 
 func (selector *serverSelector) Methods() []uint8 {
@@ -24,7 +37,7 @@ func (selector *serverSelector) Select(methods ...uint8) (method uint8) {
 	method = gosocks5.MethodNoAuth
 
 	// when user/pass is set, auth is mandatory
-	if len(selector.Users) > 0 {
+	if len(selector.users) > 0 {
 		method = gosocks5.MethodUserPass
 	}
 
@@ -40,7 +53,7 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 		}
 
 		valid := false
-		for _, user := range selector.Users {
+		for _, user := range selector.users {
 			username := user.Username()
 			password, _ := user.Password()
 			if (req.Username == username && req.Password == password) ||
@@ -50,7 +63,7 @@ func (selector *serverSelector) OnSelected(method uint8, conn net.Conn) (net.Con
 				break
 			}
 		}
-		if len(selector.Users) > 0 && !valid {
+		if len(selector.users) > 0 && !valid {
 			resp := gosocks5.NewUserPassResponse(gosocks5.UserPassVer, gosocks5.Failure)
 			if err := resp.Write(conn); err != nil {
 				return nil, err

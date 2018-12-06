@@ -273,6 +273,33 @@ type Addr struct {
 	Port uint16
 }
 
+func NewAddr(sa string) (addr *Addr, err error) {
+	host, sport, err := net.SplitHostPort(sa)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(sport)
+	if err != nil {
+		return nil, err
+	}
+
+	addr = &Addr{
+		Type: AddrDomain,
+		Host: host,
+		Port: uint16(port),
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() != nil {
+			addr.Type = AddrIPv4
+		} else {
+			addr.Type = AddrIPv6
+		}
+	}
+
+	return
+}
+
 func (addr *Addr) Decode(b []byte) error {
 	addr.Type = b[0]
 	pos := 1

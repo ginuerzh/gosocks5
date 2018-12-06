@@ -17,7 +17,7 @@ var (
 
 func init() {
 	DefaultHandler = &serverHandler{
-		selector: &serverSelector{},
+		selector: DefaultSelector,
 	}
 }
 
